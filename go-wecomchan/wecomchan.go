@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"reflect"
+	"strings"
 	"time"
 
 	"github.com/go-redis/redis/v8"
@@ -118,7 +119,7 @@ func RedisClient() *redis.Client {
 }
 
 // PostMsg 推送消息
-func PostMsg(postData JsonData, postUrl string) string {
+func PostMsg(postData map[string]interface{}, postUrl string) string {
 	postJson, _ := json.Marshal(postData)
 	log.Println("postJson ", string(postJson))
 	log.Println("postUrl ", postUrl)
@@ -223,12 +224,12 @@ func GetAccessToken() string {
 }
 
 // InitJsonData 初始化Json公共部分数据
-func InitJsonData(msgType string) JsonData {
-	return JsonData{
-		ToUser:                 WecomToUid,
-		AgentId:                WecomAid,
-		MsgType:                msgType,
-		DuplicateCheckInterval: 600,
+func InitJsonData(msgType string) map[string]interface{} {
+	return map[string]interface{}{
+		"touser":                   WecomToUid,
+		"agentid":                  WecomAid,
+		"msgtype":                  msgType,
+		"duplicate_check_interval": 600,
 	}
 }
 
@@ -271,11 +272,36 @@ func main() {
 
 		// 准备发送应用消息所需参数
 		postData := InitJsonData(msgType)
-		postData.Text = Msg{
-			Content: msgContent,
+		postData["text"] = map[string]interface{}{
+			"content": msgContent,
 		}
-		postData.Image = Pic{
-			MediaId: mediaId,
+		postData["image"] = map[string]interface{}{
+			"media_id": mediaId,
+		}
+
+		// 如果请求是json，则合并json body到postData
+		if strings.Contains(req.Header.Get("Content-Type"), "application/json") {
+			body, err := ioutil.ReadAll(req.Body)
+			if err != nil {
+				log.Printf("Error reading request body: %v", err)
+				http.Error(res, "can't read body", http.StatusBadRequest)
+				return
+			}
+			defer req.Body.Close()
+
+			var jsonData map[string]interface{}
+			err = json.Unmarshal(body, &jsonData)
+			if err != nil {
+				log.Printf("Error parsing JSON body: %v", err)
+				http.Error(res, "invalid json", http.StatusBadRequest)
+				return
+			}
+
+			log.Println("request Content-Type is json, merge json body to postData")
+			for k, v := range jsonData {
+				postData[k] = v
+			}
+		    log.Printf("postData: %v", postData)
 		}
 
 		postStatus := ""
@@ -300,3 +326,4 @@ func main() {
 	http.HandleFunc("/wecomchan", wecomChan)
 	log.Fatal(http.ListenAndServe(":8080", nil))
 }
+
